@@ -1,0 +1,6 @@
+flask
+transformers
+torch
+pandas
+requests
+beautifulsoup4

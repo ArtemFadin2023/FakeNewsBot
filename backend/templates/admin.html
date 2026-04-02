@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    font-family: Arial;
+    background: linear-gradient(135deg, #0f172a, #020617);
+    color: white;
+    padding: 20px;
+}
+
+.card {
+    background: #1e293b;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 12px;
+}
+
+.banned {
+    border: 2px solid #ef4444;
+}
+
+.chart-wrapper {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 30px;
+}
+
+.chart-box {
+    width: 350px;
+    height: 300px;
+}
+
+button {
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin: 5px;
+    cursor: pointer;
+}
+
+.filter-btn { background:#334155; color:white; opacity:0.6; }
+.filter-btn.active { background:#22c55e; opacity:1; }
+
+.ban { background:#ef4444; color:white; }
+.unban { background:#22c55e; color:white; }
+.clear { background:#f59e0b; color:black; }
+
+input {
+    padding: 12px;
+    width: 100%;
+    margin: 10px 0;
+    border-radius: 8px;
+    border: none;
+}
+</style>
+</head>
+
+<body>
+
+<h2>📊 Админ панель</h2>
+
+<input id="search" placeholder="🔍 Поиск..." oninput="loadUsers()">
+
+<div style="text-align:center;">
+<button class="filter-btn active" onclick="setFilter('all', this)">Все</button>
+<button class="filter-btn" onclick="setFilter('active', this)">Активные</button>
+<button class="filter-btn" onclick="setFilter('banned', this)">Бан</button>
+<button class="filter-btn" onclick="setFilter('telegram', this)">Telegram</button>
+<button class="filter-btn" onclick="setFilter('web', this)">Web</button>
+</div>
+
+<button class="clear" onclick="clearChat()">🗑 Очистить историю</button>
+
+<h3>📊 Статистика</h3>
+<div class="chart-wrapper">
+    <div class="chart-box"><canvas id="pieChart"></canvas></div>
+</div>
+
+<h3>📈 Динамика</h3>
+<div class="chart-wrapper">
+    <div class="chart-box"><canvas id="lineChart"></canvas></div>
+</div>
+
+<h3>👥 Пользователи</h3>
+<div id="users"></div>
+
+<h3>🧠 Логи</h3>
+<div id="logs"></div>
+
+<script>
+let pieChart;
+let lineChart;
+let filter = "all";
+let lastStats = null;
+let lastUsersHash = "";
+
+const ADMIN_ID = 6533759527;
+
+// =========================
+// 📊 STATS
+// =========================
+async function loadStats() {
+    const res = await fetch("/stats");
+    const data = await res.json();
+
+    if (JSON.stringify(data) === JSON.stringify(lastStats)) return;
+    lastStats = data;
+
+    renderCharts(data);
+    renderLogs(data.history);
+}
+
+// =========================
+// 👥 USERS (FIXED)
+// =========================
+async function loadUsers() {
+    const res = await fetch("/users");
+    let users = await res.json();
+
+    // 🔥 FIX: source + fallback
+    users = users.map(u => ({
+        ...u,
+        banned: u.banned === true || u.banned === "true",
+        username: u.username || "",
+        source: u.source || (String(u.id).startsWith("web") ? "web" : "tg")
+    }));
+
+    const newHash = JSON.stringify(users);
+    if (newHash === lastUsersHash) return;
+    lastUsersHash = newHash;
+
+    users = users.filter(u => String(u.id) !== String(ADMIN_ID));
+
+    const search = document.getElementById("search").value.toLowerCase();
+
+    if (search) {
+        users = users.filter(u =>
+            String(u.id).includes(search) ||
+            (u.username && u.username.toLowerCase().includes(search))
+        );
+    }
+
+    if (filter === "active") users = users.filter(u => !u.banned);
+    if (filter === "banned") users = users.filter(u => u.banned);
+
+    let tgUsers = users.filter(u => u.source === "tg");
+    let webUsers = users.filter(u => u.source === "web");
+
+    if (filter === "telegram") webUsers = [];
+    if (filter === "web") tgUsers = [];
+
+    const container = document.getElementById("users");
+    container.innerHTML = "";
+
+    if (tgUsers.length) {
+        container.innerHTML += "<h4>📱 Telegram пользователи</h4>";
+        tgUsers.forEach(u => container.appendChild(createUserCard(u, true)));
+    }
+
+    if (webUsers.length) {
+        container.innerHTML += "<h4>🌐 Web пользователи</h4>";
+        webUsers.forEach(u => container.appendChild(createUserCard(u, false)));
+    }
+}
+
+// =========================
+// 👤 CARD
+// =========================
+function createUserCard(u, isTelegram) {
+    const div = document.createElement("div");
+    div.className = "card " + (u.banned ? "banned" : "");
+
+    let usernameBlock = "";
+    if (isTelegram && u.username) {
+        usernameBlock = `<b>Username:</b> @${u.username}<br>`;
+    }
+
+    let actionBtn = u.banned
+        ? `<button class="unban" onclick="unbanUser('${u.id}')">✅ Разбан</button>`
+        : `<button class="ban" onclick="banUser('${u.id}')">🚫 Бан</button>`;
+
+    div.innerHTML = `
+        <b>ID:</b> ${u.id}<br>
+        ${usernameBlock}
+        <b>Тип:</b> ${u.source}<br>
+        <b>Статус:</b> ${u.banned ? "🚫 Бан" : "✅ Активен"}<br>
+        ${actionBtn}
+    `;
+
+    return div;
+}
+
+// =========================
+// 🔥 FILTER
+// =========================
+function setFilter(f, btn) {
+    filter = f;
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    lastUsersHash = "";
+    loadUsers();
+}
+
+// =========================
+// 📈 CHARTS
+// =========================
+function renderCharts(data) {
+    const ctx1 = document.getElementById('pieChart');
+    const ctx2 = document.getElementById('lineChart');
+
+    if (pieChart) pieChart.destroy();
+    if (lineChart) lineChart.destroy();
+
+    pieChart = new Chart(ctx1, {
+        type: 'pie',
+        data: {
+            labels: ['Фейк', 'Правда'],
+            datasets: [{ data: [data.fake, data.real] }]
+        }
+    });
+
+    const labels = data.timeline.map(x => x.i);
+    const fakeData = data.timeline.map(x => x.fake);
+    const realData = data.timeline.map(x => x.real);
+
+    lineChart = new Chart(ctx2, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: 'Фейк', data: fakeData },
+                { label: 'Правда', data: realData }
+            ]
+        }
+    });
+}
+
+// =========================
+// 🧠 LOGS
+// =========================
+function renderLogs(history) {
+    const container = document.getElementById("logs");
+    container.innerHTML = "";
+
+    history.slice().reverse().forEach(item => {
+        const div = document.createElement("div");
+        div.className = "card";
+
+        const user = (item.user || "").slice(0, 120);
+        const bot = (item.bot || "").slice(0, 150);
+
+        div.innerHTML = `
+            <b>👤:</b> ${user}...<br>
+            <b>🤖:</b> ${bot}...
+        `;
+
+        container.appendChild(div);
+    });
+}
+
+// =========================
+// 🚫 BAN / UNBAN
+// =========================
+async function banUser(id) {
+    await fetch("/ban", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ user_id: id, admin_id: ADMIN_ID })
+    });
+    lastUsersHash = "";
+    loadUsers();
+}
+
+async function unbanUser(id) {
+    await fetch("/unban", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ user_id: id, admin_id: ADMIN_ID })
+    });
+    lastUsersHash = "";
+    loadUsers();
+}
+
+// =========================
+// 🗑 CLEAR
+// =========================
+async function clearChat() {
+    await fetch("/clear", { method: "POST" });
+    loadStats();
+}
+
+// =========================
+// 🚀 START
+// =========================
+loadStats();
+loadUsers();
+
+setInterval(loadUsers, 3000);
+setInterval(loadStats, 8000);
+</script>
+
+</body>
+</html>

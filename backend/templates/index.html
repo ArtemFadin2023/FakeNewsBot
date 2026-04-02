@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fake News AI</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0f172a;
+    color: white;
+}
+
+.header {
+    text-align: center;
+    padding: 15px;
+    font-size: 18px;
+    background: #020617;
+    border-bottom: 1px solid #1e293b;
+}
+
+.chat {
+    max-width: 800px;
+    margin: auto;
+    padding: 20px;
+    padding-bottom: 120px;
+}
+
+.message {
+    padding: 14px;
+    margin: 12px 0;
+    border-radius: 14px;
+    max-width: 85%;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    animation: fadeIn 0.2s ease-in;
+}
+
+.user {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    margin-left: auto;
+}
+
+.bot {
+    background: #1e293b;
+}
+
+.typing {
+    opacity: 0.6;
+    font-style: italic;
+}
+
+@keyframes fadeIn {
+    from {opacity: 0; transform: translateY(5px);}
+    to {opacity: 1; transform: translateY(0);}
+}
+
+.input-area {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background: #020617;
+    border-top: 1px solid #1e293b;
+    display: flex;
+    padding: 10px;
+}
+
+input {
+    flex: 1;
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    outline: none;
+    font-size: 14px;
+    background: #1e293b;
+    color: white;
+}
+
+button {
+    margin-left: 10px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    border: none;
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.footer {
+    text-align: center;
+    font-size: 12px;
+    opacity: 0.5;
+    margin-top: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+🤖 Fake News AI
+</div>
+
+<div class="chat" id="chat"></div>
+
+<div class="input-area">
+    <input id="text" placeholder="Вставь новость или ссылку..." autofocus>
+    <button id="sendBtn" onclick="send()">➤</button>
+</div>
+
+<script>
+let sending = false;
+
+// =========================
+// 🔥 USER ID (FIXED)
+// =========================
+let user_id = localStorage.getItem("user_id");
+let username = null;
+
+if (window.Telegram && Telegram.WebApp) {
+    const tg = Telegram.WebApp.initDataUnsafe;
+
+    if (tg && tg.user) {
+        user_id = tg.user.id;
+        username = tg.user.username;
+    }
+}
+
+// 👉 создаём только 1 раз
+if (!user_id) {
+    user_id = "web_" + Date.now();
+    localStorage.setItem("user_id", user_id);
+}
+
+
+// =========================
+// 🚀 SEND
+// =========================
+async function send() {
+    if (sending) return;
+
+    const input = document.getElementById("text");
+    const button = document.getElementById("sendBtn");
+    const text = input.value.trim();
+
+    if (!text) return;
+
+    sending = true;
+    button.disabled = true;
+
+    addMessage(text, "user");
+    input.value = "";
+
+    const loading = addMessage("🤖 Анализирую...", "bot", true);
+
+    try {
+        const res = await fetch("/analyze", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                text: text,
+                user_id: user_id,
+                username: username
+            })
+        });
+
+        const data = await res.json();
+
+        loading.remove();
+        typeText(addMessage("", "bot"), data.result);
+
+    } catch (e) {
+        loading.remove();
+        addMessage("❌ Ошибка соединения", "bot");
+    }
+
+    sending = false;
+    button.disabled = false;
+}
+
+
+// =========================
+// ⌨ ENTER
+// =========================
+document.getElementById("text").addEventListener("keydown", function(e) {
+    if (e.key === "Enter") send();
+});
+
+
+// =========================
+// 💬 MESSAGE
+// =========================
+function addMessage(text, type, typing=false) {
+    const chat = document.getElementById("chat");
+
+    const div = document.createElement("div");
+    div.className = "message " + type;
+
+    if (typing) div.classList.add("typing");
+
+    div.innerText = text;
+
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+
+    return div;
+}
+
+
+// =========================
+// ✍️ TYPE ANIMATION
+// =========================
+function typeText(el, text) {
+    let i = 0;
+
+    function t() {
+        if (i < text.length) {
+            el.innerText += text[i];
+            i++;
+            setTimeout(t, 8);
+        }
+    }
+
+    t();
+}
+</script>
+
+</body>
+</html>
