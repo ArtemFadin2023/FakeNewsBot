@@ -159,35 +159,23 @@ def stats():
 def analyze():
     data = request.get_json() or {}
 
-    text = data.get("text", "").strip()
+    text = data.get("text", "")
     user_id = data.get("user_id")
     username = data.get("username")
 
     if not text:
-        return jsonify({"result": "❌ Пустой текст"})
+        return jsonify({"result": "❌ Пусто"})
 
-    if user_id:
-        add_user(user_id, username)
+    add_user(user_id, username)
 
-        if is_banned(user_id):
-            return jsonify({"result": "🚫 Ты заблокирован"})
-
-    try:
-        result = build_answer(text)
-    except Exception as e:
-        print("ERROR:", e)
-        result = "⚠️ Ошибка анализа"
+    # 🔥 ВРЕМЕННЫЙ ФИКС БЕЗ AI
+    result = f"🧠 Анализ:\n\n{text[:100]}\n\n🟡 Возможно фейк (demo)"
 
     history = load_json(HISTORY_FILE)
-    history.append({
-        "user": text[:200],
-        "bot": result
-    })
-
+    history.append({"user": text, "bot": result})
     save_json(HISTORY_FILE, history[-100:])
 
     return jsonify({"result": result})
-
 
 # =========================
 # 🗑 CLEAR
