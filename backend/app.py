@@ -20,6 +20,7 @@ NEWS_FILE = os.path.join(BASE_DIR, "news_db.json")
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 ADMINS_FILE = os.path.join(BASE_DIR, "admins.json")
 
+
 # =========================
 # 💾 JSON
 # =========================
@@ -35,6 +36,7 @@ def load_json(file):
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 # =========================
 # 👑 ADMINS
@@ -55,13 +57,13 @@ def add_admin(user_id):
         admins.append(str(user_id))
         save_json(ADMINS_FILE, admins)
 
+
 # =========================
 # 👥 USERS
 # =========================
 def load_users():
     users = load_json(USERS_FILE)
 
-    # 🔥 ФИКС СТАРЫХ ПОЛЬЗОВАТЕЛЕЙ
     for u in users:
         if "source" not in u:
             u["source"] = "web" if str(u["id"]).startswith("web") else "tg"
@@ -71,6 +73,7 @@ def load_users():
 
 def detect_type(user_id):
     return "web" if str(user_id).startswith("web") else "tg"
+
 
 def add_user(user_id, username=None):
     if not user_id:
@@ -103,6 +106,7 @@ def add_user(user_id, username=None):
 
     save_json(USERS_FILE, users)
 
+
 def is_banned(user_id):
     for u in load_users():
         if str(u["id"]) == str(user_id):
@@ -132,73 +136,81 @@ def unban_user(user_id):
 
     save_json(USERS_FILE, users)
 
-# =========================
-# 🧠 SIMILARITY
-# =========================
-def normalize(text):
-    return re.sub(r"[^\w\s]", "", text.lower()).strip()
-
-def similarity(a, b):
-    return SequenceMatcher(None, normalize(a), normalize(b)).ratio()
 
 # =========================
-# 👍👎 ОБУЧЕНИЕ
+# 🧠 ЛОГИ И СТАТА
 # =========================
-def clean_text_for_db(text):
-    text = text.lower().strip()
-    text = re.sub(r"https?://\S+", "", text)
-    return text[:300]
+@app.route("/stats")
+def stats():
+    history = load_json(HISTORY_FILE)
 
+    fake = 0
+    real = 0
+    timeline = []
 
-def update_news(text, label):
-    if not text or not label:
-        return
+    for i, item in enumerate(history):
+        txt = item.get("bot", "")
 
-    text = clean_text_for_db(text)
-    news = load_json(NEWS_FILE)
+        if "ФЕЙК" in txt or "🚨" in txt:
+            fake += 1
+        else:
+            real += 1
 
-    for item in news:
-        if similarity(item["text"], text) > 0.7:
-            if label == "real":
-                item["likes"] += 1
-            else:
-                item["dislikes"] += 1
-            save_json(NEWS_FILE, news)
-            return
+        timeline.append({
+            "i": i,
+            "fake": fake,
+            "real": real
+        })
 
-    news.append({
-        "text": text,
-        "likes": 1 if label == "real" else 0,
-        "dislikes": 1 if label == "fake" else 0
+    return jsonify({
+        "count": len(history),
+        "fake": fake,
+        "real": real,
+        "timeline": timeline,
+        "history": history[-30:]
     })
 
-    save_json(NEWS_FILE, news)
+
+# =========================
+# 🚀 ANALYZE
+# =========================
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    data = request.get_json() or {}
+
+    text = data.get("text", "").strip()
+    user_id = data.get("user_id")
+    username = data.get("username")
+
+    if not text:
+        return jsonify({"result": "❌ Пустой запрос"})
+
+    if user_id:
+        add_user(user_id, username)
+
+        if is_banned(user_id):
+            return jsonify({"result": "🚫 Ты заблокирован"})
+
+    result = build_answer(text)
+
+    history = load_json(HISTORY_FILE)
+    history.append({
+        "user": text[:200],
+        "bot": result
+    })
+    save_json(HISTORY_FILE, history)
+
+    return jsonify({"result": result})
 
 
-def get_override_score(text):
-    text = clean_text_for_db(text)
-    news = load_json(NEWS_FILE)
+# =========================
+# 🗑 CLEAR
+# =========================
+@app.route("/clear", methods=["POST"])
+def clear():
+    save_json(HISTORY_FILE, [])
+    return jsonify({"status": "ok"})
 
-    best = None
-    best_score = 0
-
-    for item in news:
-        score = similarity(item["text"], text)
-        if score > best_score:
-            best_score = score
-            best = item
-
-    if best and best_score > 0.7:
-        likes = best["likes"]
-        dislikes = best["dislikes"]
-
-        total = likes + dislikes
-        if total == 0:
-            return None
-
-        return (likes - dislikes) / total
-
-    return None
 
 # =========================
 # 🌐 ROUTES
@@ -236,7 +248,7 @@ def add_admin_api():
 
 
 # =========================
-# 🔐 защита
+# 🔐 BAN API
 # =========================
 def check_admin(data):
     return is_admin(data.get("admin_id"))
@@ -265,8 +277,11 @@ def unban_api():
 
 
 # =========================
-# 🚀 RUN
+# 🚀 RUN (FIX FOR RENDER)
 # =========================
 if __name__ == "__main__":
     print("🚀 SERVER STARTED")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+
+    port = int(os.environ.get("PORT", 5000))
+
+    app.run(host="0.0.0.0", port=port)
