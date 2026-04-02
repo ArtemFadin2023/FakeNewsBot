@@ -1,4 +1,3 @@
 flask
-requests
-deep-translator
+flask-cors
 gunicorn
