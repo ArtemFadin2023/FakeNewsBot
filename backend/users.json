@@ -3,12 +3,14 @@
     "id": 8273209192,
     "username": "PKH_officials",
     "banned": false,
-    "type": "telegram"
+    "type": "telegram",
+    "source": "tg"
   },
   {
     "id": "web_1775143794075",
     "username": null,
     "banned": false,
-    "type": "web"
+    "type": "web",
+    "source": "web"
   }
 ]
