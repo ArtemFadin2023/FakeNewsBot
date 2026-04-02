@@ -2,9 +2,7 @@ from flask import Flask, request, jsonify, render_template
 from factcheck import build_answer
 
 import json
-import re
 import os
-from difflib import SequenceMatcher
 
 print("🔥 APP START")
 
@@ -16,7 +14,6 @@ ADMIN_ID = 6533759527
 ADMIN_PASSWORD = "2703"
 
 HISTORY_FILE = os.path.join(BASE_DIR, "chat_history.json")
-NEWS_FILE = os.path.join(BASE_DIR, "news_db.json")
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 ADMINS_FILE = os.path.join(BASE_DIR, "admins.json")
 
@@ -33,6 +30,7 @@ def load_json(file):
     except:
         return []
 
+
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -44,15 +42,13 @@ def save_json(file, data):
 def load_admins():
     return [str(a) for a in load_json(ADMINS_FILE)]
 
+
 def is_admin(user_id):
     return str(user_id) == str(ADMIN_ID) or str(user_id) in load_admins()
 
+
 def add_admin(user_id):
-    if not user_id:
-        return
-
     admins = load_admins()
-
     if str(user_id) not in admins:
         admins.append(str(user_id))
         save_json(ADMINS_FILE, admins)
@@ -61,25 +57,23 @@ def add_admin(user_id):
 # =========================
 # 👥 USERS
 # =========================
+def detect_type(user_id):
+    return "web" if str(user_id).startswith("web") else "telegram"
+
+
 def load_users():
     users = load_json(USERS_FILE)
 
+    # фикс старых записей
     for u in users:
-        if "source" not in u:
-            u["source"] = "web" if str(u["id"]).startswith("web") else "tg"
+        if "type" not in u:
+            u["type"] = detect_type(u["id"])
 
     return users
 
 
-def detect_type(user_id):
-    return "web" if str(user_id).startswith("web") else "tg"
-
-
 def add_user(user_id, username=None):
-    if not user_id:
-        return
-
-    if is_admin(user_id):
+    if not user_id or is_admin(user_id):
         return
 
     users = load_users()
@@ -87,21 +81,16 @@ def add_user(user_id, username=None):
 
     for u in users:
         if str(u["id"]) == str(user_id):
-            u["source"] = user_type
-
-            if user_type == "tg":
+            u["type"] = user_type
+            if user_type == "telegram":
                 u["username"] = username
-            else:
-                u["username"] = None
-
-            save_json(USERS_FILE, users)
-            return
+            return save_json(USERS_FILE, users)
 
     users.append({
         "id": user_id,
-        "username": username if user_type == "tg" else None,
+        "username": username if user_type == "telegram" else None,
         "banned": False,
-        "source": user_type
+        "type": user_type
     })
 
     save_json(USERS_FILE, users)
@@ -115,30 +104,23 @@ def is_banned(user_id):
 
 
 def ban_user(user_id):
-    if not user_id or is_admin(user_id):
-        return
-
     users = load_users()
-
     for u in users:
         if str(u["id"]) == str(user_id):
             u["banned"] = True
-
     save_json(USERS_FILE, users)
 
 
 def unban_user(user_id):
     users = load_users()
-
     for u in users:
         if str(u["id"]) == str(user_id):
             u["banned"] = False
-
     save_json(USERS_FILE, users)
 
 
 # =========================
-# 🧠 ЛОГИ И СТАТА
+# 📊 STATS + LOGS
 # =========================
 @app.route("/stats")
 def stats():
@@ -149,9 +131,9 @@ def stats():
     timeline = []
 
     for i, item in enumerate(history):
-        txt = item.get("bot", "")
+        text = item.get("bot", "").lower()
 
-        if "ФЕЙК" in txt or "🚨" in txt:
+        if "фейк" in text or "🚨" in text:
             fake += 1
         else:
             real += 1
@@ -163,10 +145,9 @@ def stats():
         })
 
     return jsonify({
-        "count": len(history),
         "fake": fake,
         "real": real,
-        "timeline": timeline,
+        "timeline": timeline[-30:],
         "history": history[-30:]
     })
 
@@ -183,7 +164,7 @@ def analyze():
     username = data.get("username")
 
     if not text:
-        return jsonify({"result": "❌ Пустой запрос"})
+        return jsonify({"result": "❌ Пустой текст"})
 
     if user_id:
         add_user(user_id, username)
@@ -191,14 +172,19 @@ def analyze():
         if is_banned(user_id):
             return jsonify({"result": "🚫 Ты заблокирован"})
 
-    result = build_answer(text)
+    try:
+        result = build_answer(text)
+    except Exception as e:
+        print("ERROR:", e)
+        result = "⚠️ Ошибка анализа"
 
     history = load_json(HISTORY_FILE)
     history.append({
         "user": text[:200],
         "bot": result
     })
-    save_json(HISTORY_FILE, history)
+
+    save_json(HISTORY_FILE, history[-100:])
 
     return jsonify({"result": result})
 
@@ -222,11 +208,8 @@ def home():
 
 @app.route("/admin")
 def admin():
-    password = request.args.get("pass")
-
-    if password != ADMIN_PASSWORD:
+    if request.args.get("pass") != ADMIN_PASSWORD:
         return "❌ Доступ запрещен"
-
     return render_template("admin.html")
 
 
@@ -243,7 +226,7 @@ def admins_api():
 @app.route("/add_admin", methods=["POST"])
 def add_admin_api():
     data = request.get_json() or {}
-    add_admin(str(data.get("user_id")))
+    add_admin(data.get("user_id"))
     return jsonify({"status": "ok"})
 
 
@@ -277,11 +260,10 @@ def unban_api():
 
 
 # =========================
-# 🚀 RUN (FIX FOR RENDER)
+# 🚀 RUN (RENDER FIX)
 # =========================
 if __name__ == "__main__":
     print("🚀 SERVER STARTED")
 
     port = int(os.environ.get("PORT", 5000))
-
     app.run(host="0.0.0.0", port=port)
