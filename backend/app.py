@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, render_template
-from backend.factcheck import build_answer
 
 import json
 import os
