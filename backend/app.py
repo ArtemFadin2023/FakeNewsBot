@@ -64,14 +64,17 @@ def detect_type(user_id):
 def load_users():
     users = load_json(USERS_FILE)
 
-    # фикс старых записей
+    changed = False
+
     for u in users:
         if "type" not in u:
-            u["type"] = detect_type(u["id"])
+            u["type"] = "web" if str(u["id"]).startswith("web") else "telegram"
+            changed = True
+
+    if changed:
+        save_json(USERS_FILE, users)
 
     return users
-
-
 def add_user(user_id, username=None):
     if not user_id or is_admin(user_id):
         return
@@ -84,7 +87,8 @@ def add_user(user_id, username=None):
             u["type"] = user_type
             if user_type == "telegram":
                 u["username"] = username
-            return save_json(USERS_FILE, users)
+            save_json(USERS_FILE, users)
+            return
 
     users.append({
         "id": user_id,
@@ -94,7 +98,6 @@ def add_user(user_id, username=None):
     })
 
     save_json(USERS_FILE, users)
-
 
 def is_banned(user_id):
     for u in load_users():
@@ -124,33 +127,45 @@ def unban_user(user_id):
 # =========================
 @app.route("/stats")
 def stats():
-    history = load_json(HISTORY_FILE)
+    try:
+        history = load_json(HISTORY_FILE)
 
-    fake = 0
-    real = 0
-    timeline = []
+        if not isinstance(history, list):
+            history = []
 
-    for i, item in enumerate(history):
-        text = item.get("bot", "").lower()
+        fake = 0
+        real = 0
+        timeline = []
 
-        if "фейк" in text or "🚨" in text:
-            fake += 1
-        else:
-            real += 1
+        for i, item in enumerate(history):
+            text = str(item.get("bot", "")).lower()
 
-        timeline.append({
-            "i": i,
+            if "фейк" in text or "🚨" in text:
+                fake += 1
+            else:
+                real += 1
+
+            timeline.append({
+                "i": i,
+                "fake": fake,
+                "real": real
+            })
+
+        return jsonify({
             "fake": fake,
-            "real": real
+            "real": real,
+            "timeline": timeline[-30:],
+            "history": history[-30:]
         })
 
-    return jsonify({
-        "fake": fake,
-        "real": real,
-        "timeline": timeline[-30:],
-        "history": history[-30:]
-    })
-
+    except Exception as e:
+        print("STATS ERROR:", e)
+        return jsonify({
+            "fake": 0,
+            "real": 0,
+            "timeline": [],
+            "history": []
+        })
 
 # =========================
 # 🚀 ANALYZE
